@@ -29,6 +29,8 @@ Planned
 import argparse
 import re
 import sys
+import unicodedata
+
 from datetime import datetime
 from pathlib import Path
 
@@ -48,7 +50,6 @@ MERGE_SUFFIX = "_merged"
 # ==========================================================
 def banner():
     """Hiển thị banner."""
-
     print()
     print("=" * 60)
     print(f"{APP_NAME} {VERSION}")
@@ -85,7 +86,7 @@ def interactive_menu():
             pdf = input("\nInput PDF > ").strip()
 
             pages = input(
-                'Pages (Ví dụ: 1-3,5,8-10) > '
+                'Pages (Ví dụ: 1-3,5,8-, -10) > '
             ).strip()
 
             split_pdf(pdf, pages)
@@ -139,10 +140,31 @@ def interactive_menu():
 
         print()
 
+def normalize_path(path: str) -> str:
+    """
+    Chuẩn hóa path lấy từ Terminal Drag & Drop.
+    """
+    path = path.strip()
+
+    # bỏ quote
+    path = path.strip("'\"")
+
+    # Terminal escape space
+    path = path.replace("\\ ", " ")
+
+    # Unicode NFC
+    path = unicodedata.normalize(
+        "NFC",
+        path
+    )
+
+    return path
+
 def ensure_pdf(path: str | Path) -> Path:
     # Kiểm tra file tồn tại và là PDF.
     if isinstance(path, str):
-        path = path.strip().strip("'\"")
+        # path = path.strip().strip("'\"")
+        path = normalize_path(path)
 
     path = Path(path).expanduser()
 
@@ -191,7 +213,6 @@ def natural_key(path):
     page2.pdf
     page10.pdf
     """
-
     text = Path(path).name.lower()
 
     return [
@@ -202,29 +223,84 @@ def natural_key(path):
 # ----------------------------------------------------------
 # Parse pages
 # ----------------------------------------------------------
-def parse_ranges(expr: str):
-    # Chuyển: 1,2,5-7 thành [(1,1), (2,2), (5,7)]
+# def parse_ranges(expr: str):
+#     # Chuyển: 1,2,5-7 thành [(1,1), (2,2), (5,7)]
+#     expr = expr.replace(" ", "")
+
+#     if expr == "":
+#         raise ValueError("Biểu thức trang rỗng.")
+
+#     result = []
+
+#     for item in expr.split(","):
+#         if "-" in item:
+#             start, end = item.split("-")
+
+#             start = int(start)
+#             end = int(end)
+
+#             if start > end:
+#                 start, end = end, start
+
+#             result.append((start, end))
+#         else:
+#             page = int(item)
+#             result.append((page, page))
+#     return result
+
+def parse_ranges(expr: str, total_pages: int):
+    """
+    1
+    1-5
+    3-
+    -5
+    1,3-5,8-
+    """
     expr = expr.replace(" ", "")
 
     if expr == "":
-        raise ValueError("Biểu thức trang rỗng.")
+        raise ValueError(
+            "Biểu thức trang rỗng."
+        )
 
     result = []
 
     for item in expr.split(","):
-        if "-" in item:
-            start, end = item.split("-")
-
-            start = int(start)
-            end = int(end)
-
-            if start > end:
-                start, end = end, start
-
-            result.append((start, end))
-        else:
+        if "-" not in item:
             page = int(item)
-            result.append((page, page))
+
+            result.append(
+                (page, page)
+            )
+
+            continue
+
+        start_str, end_str = item.split(
+            "-",
+            1
+        )
+
+        # 3-
+        if start_str and not end_str:
+            start = int(start_str)
+            end = total_pages
+
+        # -5
+        elif not start_str and end_str:
+            start = 1
+            end = int(end_str)
+
+        # 3-8
+        else:
+            start = int(start_str)
+            end = int(end_str)
+
+        if start > end:
+            start, end = end, start
+
+        result.append(
+            (start, end)
+        )
     return result
 
 # ----------------------------------------------------------
@@ -276,7 +352,7 @@ def split_pdf(input_pdf: str, expr: str | None = None):
 
     # pdf split file.pdf "1,3-5,8"  -> Split theo nhóm trang.
     else:
-        groups = parse_ranges(expr)
+        groups = parse_ranges(expr, total_pages)
 
         print(f"Selection  : {expr}")
 
@@ -341,7 +417,6 @@ def merge_pdf(inputs, recursive=False):
         pdf merge folder
         pdf merge folder1 folder2 a.pdf
         pdf merge -r folder
-
     Notes
     -----
     - Folder sẽ tự tìm *.pdf
@@ -349,7 +424,6 @@ def merge_pdf(inputs, recursive=False):
     - Luôn Natural Sort trước khi merge
     - Output được tạo cùng thư mục với file đầu tiên
     """
-
     print_header("Merge PDF")
     # Nếu người dùng chỉ truyền đúng 1 thư mục
     single_input_dir = None
@@ -367,7 +441,8 @@ def merge_pdf(inputs, recursive=False):
     # ------------------------------------------------------
     for item in inputs:
         if isinstance(item, str):
-            item = item.strip().strip("'\"")
+            # item = item.strip().strip("'\"")
+            item = normalize_path(item)
         
         path = Path(item).expanduser()
 
